@@ -1,0 +1,166 @@
+package com.smarterme.data.cassandra;
+
+import com.datastax.driver.core.BoundStatement;
+import com.datastax.driver.core.PreparedStatement;
+import com.datastax.driver.core.ResultSet;
+import com.datastax.driver.core.Row;
+import com.datastax.driver.core.utils.UUIDs;
+import com.smarterme.model.Contact;
+import com.smarterme.model.ContactEmail;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import java.util.*;
+
+/**
+ * Created by Nitin.Gupta on 12/25/2014.
+ */
+@Component
+public class ContactEmailDao extends CassieDao<ContactEmail> {
+
+    @Value("${cassandra.mail_keyspace}")
+    private String keyspace;
+
+    protected PreparedStatement insertContactEmailStmnt;
+    protected PreparedStatement selectContactEmailStmnt;
+    protected PreparedStatement selectContactEmailByContactIdsStmnt;
+    protected PreparedStatement selectContactEmailByContactIdStmnt;
+    protected PreparedStatement selectContactEmailByEmailStmt;
+
+    public List<ContactEmail> findByEmail(List<String> contactEmails, String userName){
+        BoundStatement boundStatement = new BoundStatement(getSelectContactEmailStatement());
+
+        ResultSet results = client.session().execute(boundStatement.bind(contactEmails, userName));
+
+        return buildContactEmailsFromResultSet(results);
+    }
+
+    public List<ContactEmail> findByContactId(String userName, UUID contactId){
+        BoundStatement boundStatement = new BoundStatement(getSelectContactEmailByContactIdStmnt());
+        ResultSet results = client.session().execute(boundStatement.bind(userName, contactId));
+
+        return buildContactEmailsFromResultSet(results);
+    }
+
+    public Map<UUID,List<ContactEmail>> findContactIdEmailsMapByContactIds(String userName, List<UUID> contactIds){
+        BoundStatement boundStatement = new BoundStatement(getSelectContactEmailByContactIdsStmnt());
+        ResultSet results = client.session().execute(boundStatement.bind(userName, contactIds));
+        return buildContactEmailsMapFromResultSet(results);
+    }
+
+    public void insertContactEmail(ContactEmail contactEmail){
+        if(insertContactEmailStmnt==null){
+            insertContactEmailStmnt=getInsertContactEmailStatement();
+        }
+
+        BoundStatement boundStatement = new BoundStatement(getInsertContactEmailStatement());
+        client.session().execute(boundStatement.bind(
+                contactEmail.getContactId(),
+                contactEmail.getEmailId(),
+                contactEmail.getEmailType(),
+                contactEmail.getUserName()));
+    }
+
+    public List<ContactEmail> findContactEmailByEmail(String emailAddress){
+        BoundStatement boundStatement = new BoundStatement(getSelectContactEmailByEmailAddress());
+        ResultSet results = client.session().execute(boundStatement.bind(emailAddress));
+        return buildContactEmailsFromResultSet(results);
+    }
+
+    @Override
+    protected String getTableName() {
+        return keyspace + ".contact_email";
+    }
+
+    @Override
+    protected ContactEmail entityFromRow(Row row) {
+        ContactEmail contactEmail=new ContactEmail();
+        contactEmail.setContactId(row.getUUID("contact_id"));
+        contactEmail.setEmailId(row.getString("email"));
+        contactEmail.setEmailType(row.getString("email_type"));
+        contactEmail.setUserName(row.getString("username"));
+        return contactEmail;
+    }
+
+    protected PreparedStatement getInsertContactEmailStatement()
+    {
+        if (insertContactEmailStmnt == null)
+        {
+            insertContactEmailStmnt = client.session().prepare(
+                    "INSERT INTO " + getTableName() + " (contact_id, email, email_type, username) VALUES (?, ?, ?, ?);");
+        }
+        return insertContactEmailStmnt;
+    }
+
+    protected PreparedStatement getSelectContactEmailStatement()
+    {
+        if (selectContactEmailStmnt == null)
+        {
+            selectContactEmailStmnt = client.session().prepare(
+                    "SELECT * FROM " + getTableName() + " WHERE email in ? and username=?");
+        }
+
+        return selectContactEmailStmnt;
+    }
+
+    public PreparedStatement getSelectContactEmailByContactIdsStmnt() {
+        if(selectContactEmailByContactIdsStmnt==null){
+            selectContactEmailByContactIdsStmnt= client.session().prepare(
+                    "SELECT * FROM " + getTableName() + " WHERE username = ? and contact_id in ? ALLOW FILTERING");
+        }
+        return selectContactEmailByContactIdsStmnt;
+    }
+
+    public PreparedStatement getSelectContactEmailByContactIdStmnt() {
+        if(selectContactEmailByContactIdStmnt==null){
+            selectContactEmailByContactIdStmnt= client.session().prepare(
+                    "SELECT * FROM " + getTableName() + " WHERE username = ? and contact_id= ? ALLOW FILTERING");
+        }
+        return selectContactEmailByContactIdStmnt;
+    }
+
+
+    protected List<ContactEmail> buildContactEmailsFromResultSet(ResultSet results)
+    {
+        List<ContactEmail> contactEmails=new ArrayList<>();
+
+        for (Row row : results)
+        {
+            ContactEmail contactEmail=entityFromRow(row);
+            contactEmails.add(contactEmail);
+        }
+
+        return contactEmails;
+    }
+
+    protected Map<UUID,List<ContactEmail>> buildContactEmailsMapFromResultSet(ResultSet results)
+    {
+        Map<UUID,List<ContactEmail>> contactMailsMap=new HashMap<>();
+
+        while(results.iterator().hasNext()) {
+            Row row = results.iterator().next();
+            UUID contactId=row.getUUID("contact_id");
+
+            if (contactMailsMap.containsKey(contactId)) {
+                List<ContactEmail> contactEmails = contactMailsMap.get(contactId);
+                ContactEmail contactEmail = entityFromRow(row);
+                contactEmails.add(contactEmail);
+            } else {
+                List<ContactEmail> contactEmails = new ArrayList<>();
+                ContactEmail contactEmail = entityFromRow(row);
+                contactEmails.add(contactEmail);
+                contactMailsMap.put(contactId,contactEmails);
+            }
+        }
+        return contactMailsMap;
+    }
+
+    protected PreparedStatement getSelectContactEmailByEmailAddress(){
+        if(selectContactEmailByEmailStmt==null){
+            selectContactEmailByEmailStmt = client.session().prepare(
+                    "SELECT * FROM " + getTableName() + " WHERE email = ? ALLOW FILTERING");
+
+        }
+        return selectContactEmailByEmailStmt;
+    }
+}
